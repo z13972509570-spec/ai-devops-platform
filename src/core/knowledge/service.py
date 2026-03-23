@@ -119,9 +119,9 @@ class KnowledgeService:
         # 添加边：症状 -> 事件 -> 解决方案
         self.kg.add_edge(KnowledgeEdge("cpu_spike", "pod_restart", "leads_to"))
         self.kg.add_edge(KnowledgeEdge("memory_leak", "oom_killer", "leads_to"))
-        self.kg.add_edge(KnowledgeEdge("restart_service", "pod_restart", "resolves"))
-        self.kg.add_edge(KnowledgeEdge("restart_service", "oom_killer", "resolves"))
-        self.kg.add_edge(KnowledgeEdge("increase_memory", "memory_leak", "resolves"))
+        self.kg.add_edge(KnowledgeEdge("pod_restart", "restart_service", "resolves"))
+        self.kg.add_edge(KnowledgeEdge("oom_killer", "restart_service", "resolves"))
+        self.kg.add_edge(KnowledgeEdge("memory_leak", "increase_memory", "resolves"))
         self.kg.add_edge(KnowledgeEdge("cpu_spike", "oom_killer", "leads_to"))
     
     def search(self, query: str) -> List[Dict]:
@@ -155,10 +155,17 @@ class KnowledgeService:
         recommendations = []
         
         for symptom in symptoms:
-            # 找到该症状相关的所有边
+            # 找到该症状相关的所有边（模糊匹配）
             symptom_node = None
+            symptom_lower = symptom.lower()
             for node in self.kg.nodes.values():
-                if symptom.lower() in str(node.data).lower() and node.type == "symptom":
+                if node.type != "symptom":
+                    continue
+                # 检查症状词是否出现在节点描述中
+                node_desc = str(node.data.get("description", "")).lower()
+                # 匹配：输入的症状词是否在描述中，或者描述词是否在症状中
+                if (symptom_lower in node_desc or
+                    any(word in symptom_lower for word in node_desc.split())):
                     symptom_node = node
                     break
             
@@ -174,11 +181,13 @@ class KnowledgeService:
                         events.append(target)
             
             # 查找解决事件的方法
+            seen_solutions = set()
             for event in events:
                 for edge in self.kg.get_outgoing_edges(event.id):
                     if edge.relation == "resolves":
                         solution = self.kg.nodes.get(edge.to_id)
-                        if solution:
+                        if solution and solution.id not in seen_solutions:
+                            seen_solutions.add(solution.id)
                             recommendations.append({
                                 "symptom": symptom_node.data,
                                 "incident": event.data,
